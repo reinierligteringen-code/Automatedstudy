@@ -5,7 +5,12 @@ on:
     paths:
       - 'incoming/*.zip'
       - 'incoming/**/*.zip'
-  workflow_dispatch: {}   # allows manual "Run workflow"
+  workflow_dispatch:
+    inputs:
+      zip_path:
+        description: 'Path to ZIP inside incoming/, e.g. incoming/site-4.zip'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -19,41 +24,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
 
-      - name: Find newest ZIP (guard + debug)
-        id: find
+      - name: Pick ZIP (manual input or newest) — with debug
+        id: pick
         shell: bash
         run: |
           set -e
+          in="${{ inputs.zip_path }}"
+          if [ -n "$in" ]; then
+            echo "zip=$in" >> $GITHUB_OUTPUT
+            echo "Picked (manual): $in"
+            exit 0
+          fi
           shopt -s nullglob
           zips=(incoming/**/*.zip incoming/*.zip)
-          echo "ZIP candidates:" "${zips[@]:-<none>}"
           if (( ${#zips[@]} == 0 )); then
-            echo "found=false" >> $GITHUB_OUTPUT
+            echo "::notice::No ZIPs in incoming/. Nothing to do."
+            echo "zip=" >> $GITHUB_OUTPUT
             exit 0
           fi
           newest=$(ls -t "${zips[@]}" | head -n1)
-          echo "found=true" >> $GITHUB_OUTPUT
           echo "zip=$newest" >> $GITHUB_OUTPUT
-          echo "Picked: $newest"
+          echo "Picked (newest): $newest"
+          echo "Listing incoming/:"
+          ls -la incoming || true
 
-      - name: Exit early (no zip)
-        if: steps.find.outputs.found != 'true'
-        run: echo "No zip present; exiting successfully."
+      - name: Exit if nothing to import
+        if: steps.pick.outputs.zip == ''
+        run: echo "No ZIP present; exiting successfully."
 
       - name: Extract ZIP
-        if: steps.find.outputs.found == 'true'
+        if: steps.pick.outputs.zip != ''
         shell: bash
         run: |
           set -e
           rm -rf site_new
           mkdir -p site_new
-          unzip -q "${{ steps.find.outputs.zip }}" -d site_new
+          unzip -q "${{ steps.pick.outputs.zip }}" -d site_new
           echo "After unzip:"
           ls -la site_new
-          # Flatten if single top-level dir
+          # Flatten single top-level folder
           count_dirs=$(find site_new -mindepth 1 -maxdepth 1 -type d | wc -l)
           count_all=$(ls -1 site_new | wc -l)
           if [ "$count_dirs" -eq 1 ] && [ "$count_all" -eq 1 ]; then
@@ -66,13 +77,13 @@ jobs:
           echo "site_new final:"
           ls -la site_new
 
-      - name: Ensure index.html exists (in site_new)
-        if: steps.find.outputs.found == 'true'
+      - name: Ensure index.html exists in site_new
+        if: steps.pick.outputs.zip != ''
         run: |
-          test -f site_new/index.html || (echo "::error::ZIP does not contain index.html at root" && exit 1)
+          test -f site_new/index.html || (echo "::error::ZIP does not contain index.html at the root" && exit 1)
 
       - name: Replace repository contents (keep infra)
-        if: steps.find.outputs.found == 'true'
+        if: steps.pick.outputs.zip != ''
         shell: bash
         run: |
           set -e
@@ -86,13 +97,13 @@ jobs:
           echo "Repo root now contains:"
           ls -la
 
-      - name: Ensure index.html exists (in repo root)
-        if: steps.find.outputs.found == 'true'
+      - name: Ensure index.html exists in repo root
+        if: steps.pick.outputs.zip != ''
         run: |
           test -f index.html || (echo "::error::Importer failed to place index.html at repo root" && exit 1)
 
       - name: Commit and push to main
-        if: steps.find.outputs.found == 'true'
+        if: steps.pick.outputs.zip != ''
         env:
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
@@ -101,5 +112,5 @@ jobs:
         run: |
           git add -A
           git status
-          git commit -m "Auto-import: ${{ steps.find.outputs.zip }}" || echo "No changes"
+          git commit -m "Auto-import: ${{ steps.pick.outputs.zip }}" || echo "No changes"
           git push
