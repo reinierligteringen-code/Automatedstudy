@@ -5,6 +5,7 @@ on:
     paths:
       - 'incoming/*.zip'
       - 'incoming/**/*.zip'
+  workflow_dispatch: {}   # allows manual "Run workflow"
 
 permissions:
   contents: write
@@ -28,21 +29,19 @@ jobs:
           set -e
           shopt -s nullglob
           zips=(incoming/**/*.zip incoming/*.zip)
+          echo "ZIP candidates:" "${zips[@]:-<none>}"
           if (( ${#zips[@]} == 0 )); then
             echo "found=false" >> $GITHUB_OUTPUT
-            echo "No ZIPs in incoming/."
             exit 0
           fi
           newest=$(ls -t "${zips[@]}" | head -n1)
           echo "found=true" >> $GITHUB_OUTPUT
           echo "zip=$newest" >> $GITHUB_OUTPUT
           echo "Picked: $newest"
-          echo "Listing incoming/:"
-          ls -la incoming || true
 
       - name: Exit early (no zip)
         if: steps.find.outputs.found != 'true'
-        run: echo "No ZIP present; exiting successfully."
+        run: echo "No zip present; exiting successfully."
 
       - name: Extract ZIP
         if: steps.find.outputs.found == 'true'
@@ -52,9 +51,9 @@ jobs:
           rm -rf site_new
           mkdir -p site_new
           unzip -q "${{ steps.find.outputs.zip }}" -d site_new
-          echo "After unzip, site_new contains:"
+          echo "After unzip:"
           ls -la site_new
-          # Flatten if the ZIP has a single top-level directory
+          # Flatten if single top-level dir
           count_dirs=$(find site_new -mindepth 1 -maxdepth 1 -type d | wc -l)
           count_all=$(ls -1 site_new | wc -l)
           if [ "$count_dirs" -eq 1 ] && [ "$count_all" -eq 1 ]; then
@@ -64,10 +63,10 @@ jobs:
             mv "$inner"/* site_new/ 2>/dev/null || true
             rmdir "$inner" || true
           fi
-          echo "Final site_new:"
+          echo "site_new final:"
           ls -la site_new
 
-      - name: Ensure index.html exists
+      - name: Ensure index.html exists (in site_new)
         if: steps.find.outputs.found == 'true'
         run: |
           test -f site_new/index.html || (echo "::error::ZIP does not contain index.html at root" && exit 1)
@@ -82,10 +81,15 @@ jobs:
             case "$i" in .git|.github|incoming|README.md) continue;; esac
             rm -rf "$i"
           done
-          mv site_new/* . || true
-          rmdir site_new 2>/dev/null || true
-          echo "Repo root after replace:"
+          mv site_new/* .
+          rmdir site_new || true
+          echo "Repo root now contains:"
           ls -la
+
+      - name: Ensure index.html exists (in repo root)
+        if: steps.find.outputs.found == 'true'
+        run: |
+          test -f index.html || (echo "::error::Importer failed to place index.html at repo root" && exit 1)
 
       - name: Commit and push to main
         if: steps.find.outputs.found == 'true'
