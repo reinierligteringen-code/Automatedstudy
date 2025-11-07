@@ -14,30 +14,36 @@ concurrency:
 
 jobs:
   import:
-    if: ${{ hashFiles('incoming/*.zip') != '' }}   # skip runs when no ZIP is present
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: List ZIPs in incoming (debug)
+      - name: Check for a ZIP (guard)
+        id: guard
         run: |
-          echo "PWD:" && pwd
-          echo "incoming/ listing:" && ls -la incoming || true
-          echo "ZIPs:" && ls -lt incoming/*.zip || true
+          shopt -s nullglob
+          set -- incoming/*.zip
+          if [ "$#" -eq 0 ]; then
+            echo "found=false" >> $GITHUB_OUTPUT
+          else
+            latest=$(ls -t incoming/*.zip | head -n1)
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "zip=$latest" >> $GITHUB_OUTPUT
+            echo "Picked $latest"
+          fi
 
-      - name: Pick newest ZIP
-        id: pick
-        run: |
-          set -euo pipefail
-          echo "zip=$(ls -t incoming/*.zip | head -n1)" >> $GITHUB_OUTPUT
+      - name: Exit early (no zip)
+        if: steps.guard.outputs.found != 'true'
+        run: echo "No zip present; exiting successfully."
 
       - name: Extract ZIP
+        if: steps.guard.outputs.found == 'true'
         run: |
           rm -rf site_new
           mkdir -p site_new
-          unzip -q "${{ steps.pick.outputs.zip }}" -d site_new
+          unzip -q "${{ steps.guard.outputs.zip }}" -d site_new
           shopt -s dotglob
           # Flatten if the ZIP has a single top-level folder
           if [ "$(find site_new -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ] && [ "$(ls -1 site_new | wc -l)" -eq 1 ]; then
@@ -45,6 +51,7 @@ jobs:
           fi
 
       - name: Replace repository contents (keep infra)
+        if: steps.guard.outputs.found == 'true'
         run: |
           shopt -s dotglob
           for i in *; do
@@ -55,6 +62,7 @@ jobs:
           rm -rf site_new
 
       - name: Commit and push to main
+        if: steps.guard.outputs.found == 'true'
         env:
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
@@ -62,5 +70,5 @@ jobs:
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           git add -A
-          git commit -m "Auto-import: ${{ steps.pick.outputs.zip }}" || echo "No changes"
+          git commit -m "Auto-import: ${{ steps.guard.outputs.zip }}" || echo "No changes"
           git push
