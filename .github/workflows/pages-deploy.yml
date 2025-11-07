@@ -1,7 +1,11 @@
 name: Deploy to GitHub Pages
+
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'incoming/**'                 # <- don't deploy on ZIP uploads
+      - '.github/workflows/import-website.yml'  # (optional) ignore importer edits
 
 permissions:
   contents: read
@@ -17,12 +21,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # If you have a build step (e.g. npm run build), add it here.
-      # For pure static sites, deploy the repo root:
+
+      # Prove what's being deployed; fail loudly if index.html is missing
+      - name: Show files that will be deployed
+        run: |
+          echo "PWD: $(pwd)"
+          ls -la
+          if [ ! -f index.html ]; then
+            echo "::error::No index.html at repository root. The importer didn’t place it."
+            exit 1
+          fi
+          touch .nojekyll
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: .
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
