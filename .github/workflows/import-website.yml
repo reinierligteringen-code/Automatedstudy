@@ -14,15 +14,24 @@ concurrency:
 
 jobs:
   import:
+    if: ${{ hashFiles('incoming/*.zip') != '' }}   # skip runs when no ZIP is present
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: List ZIPs in incoming (debug)
+        run: |
+          echo "PWD:" && pwd
+          echo "incoming/ listing:" && ls -la incoming || true
+          echo "ZIPs:" && ls -lt incoming/*.zip || true
+
       - name: Pick newest ZIP
         id: pick
-        run: echo "zip=$(ls -t incoming/*.zip | head -n1)" >> $GITHUB_OUTPUT
+        run: |
+          set -euo pipefail
+          echo "zip=$(ls -t incoming/*.zip | head -n1)" >> $GITHUB_OUTPUT
 
       - name: Extract ZIP
         run: |
