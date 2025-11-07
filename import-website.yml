@@ -1,0 +1,57 @@
+name: Import website ZIP
+
+on:
+  push:
+    paths:
+      - 'incoming/*.zip'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: import-website
+  cancel-in-progress: true
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pick newest ZIP
+        id: pick
+        run: echo "zip=$(ls -t incoming/*.zip | head -n1)" >> $GITHUB_OUTPUT
+
+      - name: Extract ZIP
+        run: |
+          rm -rf site_new
+          mkdir -p site_new
+          unzip -q "${{ steps.pick.outputs.zip }}" -d site_new
+          shopt -s dotglob
+          # Flatten if the ZIP has a single top-level folder
+          if [ "$(find site_new -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ] && [ "$(ls -1 site_new | wc -l)" -eq 1 ]; then
+            mv site_new/*/* site_new/ 2>/dev/null || true
+          fi
+
+      - name: Replace repository contents (keep infra)
+        run: |
+          shopt -s dotglob
+          for i in *; do
+            case "$i" in .git|.github|incoming|README.md) continue;; esac
+            rm -rf "$i"
+          done
+          mv site_new/* .
+          rm -rf site_new
+
+      - name: Commit and push to main
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          git add -A
+          git commit -m "Auto-import: ${{ steps.pick.outputs.zip }}" || echo "No changes"
+          git push

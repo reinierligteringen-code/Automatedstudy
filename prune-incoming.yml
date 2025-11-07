@@ -1,0 +1,29 @@
+name: Prune old ZIPs
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # Mondays 03:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete all but the newest 3 ZIPs
+        run: |
+          set -e
+          cd incoming
+          keep=3
+          count=$(ls -1t *.zip 2>/dev/null | wc -l || echo 0)
+          if [ "$count" -gt "$keep" ]; then
+            ls -1t *.zip | tail -n +$((keep+1)) | xargs -r git rm -f
+          fi
+      - name: Commit prune
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Prune old ZIPs in incoming/" || echo "Nothing to prune"
+          git push
